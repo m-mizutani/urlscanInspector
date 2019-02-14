@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  LambdaRoleArn:
+    Type: String
+    Default: ""
+  TaskNotificationArn:
+    Type: String
+  SubmitterName:
+    Type: String
+  SubmitterRegion:
+    Type: String
+  SecretArn:
+    Type: String
+
+Conditions:
+  LambdaRoleRequired:
+    Fn::Equals: [ { Ref: LambdaRoleArn }, "" ]
+
+Resources:
+  # --------------------------------------------------------
+  # Lambda functions
+  Handler:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: build
+      Handler: main
+      Runtime: go1.x
+      CodeUri: build
+      Timeout: 300
+      MemorySize: 128
+      Role:
+        Fn::If: [ LambdaRoleRequired, {"Fn::GetAtt": LambdaRole.Arn}, {Ref: LambdaRoleArn} ]
+      Environment:
+        Variables:
+          SUBMITTER_NAME:
+            Ref: SubmitterName
+          SUBMITTER_REGION:
+            Ref: SubmitterRegion
+          SECRET_ARN:
+            Ref: SecretArn
+      Events:
+        NotifyTopic:
+          Type: SNS
+          Properties:
+            Topic:
+              Ref: TaskNotificationArn
+
+  # --------------------------------------------------------
+  # IAM Roles
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Condition: LambdaRoleRequired
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: ["lambda.amazonaws.com"]
+            Action: ["sts:AssumeRole"]
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: "AlertResponderLambdaPolicy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action:
+                  - secretsmanager:GetSecretValue
+                Resource:
+                  - Ref: SecretArn
