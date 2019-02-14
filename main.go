@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	ar "github.com/m-mizutani/AlertResponder/lib"
@@ -57,7 +58,44 @@ func inspectIPAddr(task ar.Task, secrets secretValues) (*ar.ReportPage, error) {
 }
 
 func inspectURL(task ar.Task, secrets secretValues) (*ar.ReportPage, error) {
-	return nil, nil
+	url := task.Attr.Value
+	if !strings.HasPrefix(url, "http://") && strings.HasPrefix(url, "https://") {
+		url = fmt.Sprintf("http://%s", url)
+	}
+
+	client := urlscan.NewClient(secrets.URLScanAPIKey)
+	t, err := client.Submit(urlscan.SubmitArguments{URL: url})
+	if err != nil {
+		return nil, errors.Wrap(err, "Fail to submit scan request")
+	}
+
+	err = t.Wait()
+	if err != nil {
+		return nil, errors.Wrap(err, "Fail to fetch requested scan result")
+	}
+
+	logger.WithField("results", t.Result).Info("urlscan.io results")
+
+	host := ar.ReportOpponentHost{}
+
+	ts, err := time.Parse("2006-01-02T15:04:05.000Z", t.Result.Task.Time)
+	if err != nil {
+		ts = time.Time{} // set empty time
+	}
+
+	p := ar.ReportURL{
+		URL:       t.Result.Page.URL,
+		Timestamp: ts,
+		Reference: fmt.Sprintf("https://urlscan.io/result/%s/", t.Result.Task.UUID),
+		Source:    "urlscan.io",
+	}
+	host.RelatedURLs = append(host.RelatedURLs, p)
+	logger.WithField("report", p).Info("Add page")
+
+	page := ar.NewReportPage()
+	page.OpponentHosts = append(page.OpponentHosts, host)
+
+	return &page, nil
 }
 
 // StartInspection is a main function of the inspector.
